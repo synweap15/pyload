@@ -2,82 +2,131 @@
 
 import re
 
-from module.plugins.internal.SimpleHoster import SimpleHoster, create_getInfo, replace_patterns, set_cookies
+from module.plugins.internal.Plugin import Fail, encode
+from module.plugins.internal.SimpleHoster import SimpleHoster, create_getInfo, replace_patterns, set_cookie, set_cookies
 
 
 class MultiHoster(SimpleHoster):
     __name__    = "MultiHoster"
     __type__    = "hoster"
-    __version__ = "0.27"
+    __version__ = "0.50"
+    __status__  = "testing"
 
     __pattern__ = r'^unmatchable$'
+    __config__  = [("use_premium" , "bool", "Use premium account if available"    , True),
+                   ("revertfailed", "bool", "Revert to standard download if fails", True)]
 
     __description__ = """Multi hoster plugin"""
     __license__     = "GPLv3"
     __authors__     = [("Walter Purcaro", "vuolter@gmail.com")]
 
 
+    HOSTER_NAME = None
+
+    LEECH_HOSTER  = False
     LOGIN_ACCOUNT = True
 
 
+    def init(self):
+        self.HOSTER_NAME = self.pyload.pluginManager.hosterPlugins[self.__name__]['name']
+
+
+    def _log(self, level, plugintype, pluginname, messages):
+        return super(MultiHoster, self)._log(level,
+                                             plugintype,
+                                             pluginname,
+                                             (self.HOSTER_NAME,) + messages)
+
+
     def setup(self):
-        self.chunkLimit = 1
-        self.multiDL    = self.premium
+        self.chunk_limit     = 1
+        self.multiDL         = bool(self.account)
+        self.resume_download = self.premium
 
 
     def prepare(self):
-        self.info      = {}
-        self.link      = ""     #@TODO: Move to hoster class in 0.4.10
-        self.directDL  = False  #@TODO: Move to hoster class in 0.4.10
+        #@TODO: Recheck in 0.4.10
+        plugin = self.pyload.pluginManager.hosterPlugins[self.__name__]
+        name   = plugin['name']
+        module = plugin['module']
+        klass  = getattr(module, name)
 
-        if self.LOGIN_ACCOUNT and not self.account:
-            self.fail(_("Required account not found"))
-
-        self.req.setOption("timeout", 120)
-
-        if isinstance(self.COOKIES, list):
-            set_cookies(self.req.cj, self.COOKIES)
+        self.get_info = klass.get_info
 
         if self.DIRECT_LINK is None:
-            self.directDL = self.__pattern__ != r'^unmatchable$'
+            direct_dl = self.__pattern__ != r'^unmatchable$' and re.match(self.__pattern__, self.pyfile.url)
         else:
-            self.directDL = self.DIRECT_LINK
+            direct_dl = self.DIRECT_LINK
 
-        self.pyfile.url = replace_patterns(self.pyfile.url,
-                                           self.FILE_URL_REPLACEMENTS if hasattr(self, "FILE_URL_REPLACEMENTS") else self.URL_REPLACEMENTS)  #@TODO: Remove FILE_URL_REPLACEMENTS check in 0.4.10
+        super(MultiHoster, self).prepare()
+
+        self.direct_dl = direct_dl
 
 
     def process(self, pyfile):
-        self.prepare()
+        try:
+            self.prepare()
+            self.check_info()  #@TODO: Remove in 0.4.10
 
-        if self.directDL:
-            self.logDebug("Looking for direct download link...")
-            self.handleDirect()
+            if self.direct_dl:
+                self.log_info(_("Looking for direct download link..."))
+                self.handle_direct(pyfile)
 
-        if self.link:
-            self.pyfile.url = self.link
-            self.checkNameSize()
+                if self.link or was_downloaded():
+                    self.log_info(_("Direct download link detected"))
+                else:
+                    self.log_info(_("Direct download link not found"))
 
-        elif not self.lastDownload:
-            self.preload()
-            self.checkInfo()
+            if not self.link and not self.last_download:
+                self.preload()
 
-            if self.premium and (not self.CHECK_TRAFFIC or self.checkTrafficLeft()):
-                self.logDebug("Handled as premium download")
-                self.handlePremium()
+                self.check_errors()
+                self.check_status(getinfo=False)
+
+                if self.premium and (not self.CHECK_TRAFFIC or self.check_traffic_left()):
+                    self.log_info(_("Processing as premium download..."))
+                    self.handle_premium(pyfile)
+
+                elif not self.LOGIN_ACCOUNT or (not self.CHECK_TRAFFIC or self.check_traffic_left()):
+                    self.log_info(_("Processing as free download..."))
+                    self.handle_free(pyfile)
+
+            if not self.last_download:
+                self.log_info(_("Downloading file..."))
+                self.download(self.link, disposition=self.DISPOSITION)
+
+            self.check_file()
+
+        except Fail, e:  #@TODO: Move to PluginThread in 0.4.10
+            if self.premium:
+                self.log_warning(_("Premium download failed"))
+                self.restart(nopremium=True)
+
+            elif self.get_config("revertfailed", True) \
+                 and "new_module" in self.pyload.pluginManager.hosterPlugins[self.__name__]:
+                hdict = self.pyload.pluginManager.hosterPlugins[self.__name__]
+
+                tmp_module = hdict['new_module']
+                tmp_name   = hdict['new_name']
+                hdict.pop('new_module', None)
+                hdict.pop('new_name', None)
+
+                pyfile.initPlugin()
+
+                hdict['new_module'] = tmp_module
+                hdict['new_name']   = tmp_name
+
+                self.restart(_("Revert to original hoster plugin"))
+
             else:
-                self.logDebug("Handled as free download")
-                self.handleFree()
-
-        self.downloadLink(self.link)
-        self.checkFile()
+                raise Fail(encode(e))  #@TODO: Remove `encode` in 0.4.10
 
 
-    def handlePremium(self):
-        return self.handleFree()
+    def handle_premium(self, pyfile):
+        return self.handle_free(pyfile)
 
 
-    def handleFree(self):
+    def handle_free(self, pyfile):
         if self.premium:
             raise NotImplementedError
         else:

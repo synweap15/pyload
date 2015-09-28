@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 
 import re
-
-from urllib import unquote_plus
+import urllib
 
 from module.common.json_layer import json_loads
 from module.plugins.internal.MultiHoster import MultiHoster, create_getInfo
@@ -11,11 +10,14 @@ from module.plugins.internal.MultiHoster import MultiHoster, create_getInfo
 class MegaDebridEu(MultiHoster):
     __name__    = "MegaDebridEu"
     __type__    = "hoster"
-    __version__ = "0.45"
+    __version__ = "0.50"
+    __status__  = "testing"
 
     __pattern__ = r'http://((?:www\d+\.|s\d+\.)?mega-debrid\.eu|\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})/download/file/[\w^_]+'
+    __config__  = [("use_premium" , "bool", "Use premium account if available"    , True),
+                   ("revertfailed", "bool", "Revert to standard download if fails", True)]
 
-    __description__ = """mega-debrid.eu hoster plugin"""
+    __description__ = """Mega-debrid.eu multi-hoster plugin"""
     __license__     = "GPLv3"
     __authors__     = [("D.Ducatel", "dducatel@je-geek.fr")]
 
@@ -23,33 +25,14 @@ class MegaDebridEu(MultiHoster):
     API_URL = "https://www.mega-debrid.eu/api.php"
 
 
-    def getFilename(self, url):
-        try:
-            return unquote_plus(url.rsplit("/", 1)[1])
-        except IndexError:
-            return ""
-
-
-    def handlePremium(self):
-        if not self.connectToApi():
-            self.exitOnFail("Unable to connect to Mega-debrid.eu")
-
-        self.link = self.debridLink(self.pyfile.url)
-        self.logDebug("New URL: " + self.link)
-
-        filename = self.getFilename(self.link)
-        if filename != "":
-            self.pyfile.name = filename
-
-
-    def connectToApi(self):
+    def api_load(self):
         """
         Connexion to the mega-debrid API
         Return True if succeed
         """
-        user, data = self.account.selectAccount()
+        user, info = self.account.select()
         jsonResponse = self.load(self.API_URL,
-                                 get={'action': 'connectUser', 'login': user, 'password': data['password']})
+                                 get={'action': 'connectUser', 'login': user, 'password': info['login']['password']})
         res = json_loads(jsonResponse)
 
         if res['response_code'] == "ok":
@@ -59,32 +42,21 @@ class MegaDebridEu(MultiHoster):
             return False
 
 
-    def debridLink(self, linkToDebrid):
+    def handle_premium(self, pyfile):
         """
         Debrid a link
         Return The debrided link if succeed or original link if fail
         """
-        jsonResponse = self.load(self.API_URL, get={'action': 'getLink', 'token': self.token},
-                                 post={"link": linkToDebrid})
+        if not self.api_load():
+            self.error("Unable to connect to remote API")
+
+        jsonResponse = self.load(self.API_URL,
+                                 get={'action': 'getLink', 'token': self.token},
+                                 post={'link': pyfile.url})
+
         res = json_loads(jsonResponse)
-
         if res['response_code'] == "ok":
-            debridedLink = res['debridLink'][1:-1]
-            return debridedLink
-        else:
-            self.exitOnFail("Unable to debrid %s" % linkToDebrid)
-
-
-    def exitOnFail(self, msg):
-        """
-        exit the plugin on fail case
-        And display the reason of this failure
-        """
-        if self.getConfig("unloadFailing"):
-            self.logError(_(msg))
-            self.resetAccount()
-        else:
-            self.fail(_(msg))
+            self.link = res['debridLink'][1:-1]
 
 
 getInfo = create_getInfo(MegaDebridEu)

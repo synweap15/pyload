@@ -1,17 +1,19 @@
 # -*- coding: utf-8 -*-
 
 import re
-from module.plugins.Crypter import Crypter
+
+from module.plugins.internal.MultiCrypter import MultiCrypter
 
 
-class LinkdecrypterCom(Crypter):
+class LinkdecrypterCom(MultiCrypter):
     __name__    = "LinkdecrypterCom"
     __type__    = "crypter"
-    __version__ = "0.28"
+    __version__ = "0.32"
+    __status__  = "testing"
 
     __pattern__ = r'^unmatchable$'
-    __config__  = [("use_subfolder", "bool", "Save package to subfolder", True),
-                   ("subfolder_per_package", "bool", "Create a subfolder for each package", True)]
+    __config__  = [("use_subfolder"     , "bool", "Save package to subfolder"          , True),
+                   ("subfolder_per_pack", "bool", "Create a subfolder for each package", True)]
 
     __description__ = """Linkdecrypter.com decrypter plugin"""
     __license__     = "GPLv3"
@@ -26,45 +28,20 @@ class LinkdecrypterCom(Crypter):
 
 
     def setup(self):
-        self.password = self.getPassword()
+        self.password = self.get_password()
         self.req.setOption("timeout", 300)
 
 
     def decrypt(self, pyfile):
-        # API not working anymore
-        self.urls = self.decryptHTML()
-
-
-    def decryptAPI(self):
-        get_dict = {"t": "link", "url": self.pyfile.url, "lcache": "1"}
-        self.html = self.load('http://linkdecrypter.com/api', get=get_dict)
-        if self.html.startswith('http://'):
-            return self.html.splitlines()
-
-        if self.html == 'INTERRUPTION(PASSWORD)':
-            get_dict['pass'] = self.password
-
-            self.html = self.load('http://linkdecrypter.com/api', get=get_dict)
-            if self.html.startswith('http://'):
-                return self.html.splitlines()
-
-        self.logError("API", self.html)
-        if self.html == 'INTERRUPTION(PASSWORD)':
-            self.fail(_("No or incorrect password"))
-
-        return None
-
-
-    def decryptHTML(self):
         retries = 5
 
-        post_dict = {"link_cache": "on", "pro_links": self.pyfile.url, "modo_links": "text"}
-        self.html = self.load('http://linkdecrypter.com/', post=post_dict, cookies=True, decode=True)
+        post_dict = {'link_cache': "on", 'pro_links': pyfile.url, 'modo_links': "text"}
+        self.html = self.load('http://linkdecrypter.com/', post=post_dict)
 
         while retries:
-            m = re.search(self.TEXTAREA_PATTERN, self.html, flags=re.S)
+            m = re.search(self.TEXTAREA_PATTERN, self.html, re.S)
             if m:
-                return [x for x in m.group(1).splitlines() if '[LINK-ERROR]' not in x]
+                self.urls = [x for x in m.group(1).splitlines() if '[LINK-ERROR]' not in x]
 
             m = re.search(self.CAPTCHA_PATTERN, self.html)
             if m:
@@ -73,23 +50,21 @@ class LinkdecrypterCom(Crypter):
 
                 m = re.search(r"<p><i><b>([^<]+)</b></i></p>", self.html)
                 msg = m.group(1) if m else ""
-                self.logInfo(_("Captcha protected link"), result_type, msg)
+                self.log_info(_("Captcha protected link"), result_type, msg)
 
-                captcha = self.decryptCaptcha(captcha_url, result_type=result_type)
+                captcha = self.captcha.decrypt(captcha_url, output_type=result_type)
                 if result_type == "positional":
                     captcha = "%d|%d" % captcha
-                self.html = self.load('http://linkdecrypter.com/', post={"captcha": captcha}, decode=True)
+                self.html = self.load('http://linkdecrypter.com/', post={'captcha': captcha})
                 retries -= 1
 
             elif self.PASSWORD_PATTERN in self.html:
                 if self.password:
-                    self.logInfo(_("Password protected link"))
-                    self.html = self.load('http://linkdecrypter.com/', post={'password': self.password}, decode=True)
+                    self.log_info(_("Password protected link"))
+                    self.html = self.load('http://linkdecrypter.com/', post={'password': self.password})
                 else:
                     self.fail(_("Missing password"))
 
             else:
                 retries -= 1
-                self.html = self.load('http://linkdecrypter.com/', cookies=True, decode=True)
-
-        return None
+                self.html = self.load('http://linkdecrypter.com/')

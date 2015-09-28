@@ -2,17 +2,18 @@
 
 import re
 
-from module.plugins.Hoster import Hoster
+from module.plugins.internal.Hoster import Hoster
 
 
 class VeehdCom(Hoster):
     __name__    = "VeehdCom"
     __type__    = "hoster"
-    __version__ = "0.23"
+    __version__ = "0.25"
+    __status__  = "testing"
 
     __pattern__ = r'http://veehd\.com/video/\d+_\S+'
-    __config__ = [("filename_spaces", "bool", "Allow spaces in filename", False),
-                  ("replacement_char", "str", "Filename replacement character", "_")]
+    __config__  = [("filename_spaces", "bool", "Allow spaces in filename", False),
+                   ("replacement_char", "str", "Filename replacement character", "_")]
 
     __description__ = """Veehd.com hoster plugin"""
     __license__     = "GPLv3"
@@ -35,7 +36,7 @@ class VeehdCom(Hoster):
 
     def download_html(self):
         url = self.pyfile.url
-        self.logDebug("Requesting page: %s" % url)
+        self.log_debug("Requesting page: %s" % url)
         self.html = self.load(url)
 
 
@@ -52,28 +53,29 @@ class VeehdCom(Hoster):
         if not self.html:
             self.download_html()
 
-        m = re.search(r'<title[^>]*>([^<]+) on Veehd</title>', self.html)
+        m = re.search(r'<title.*?>([^<]+) on Veehd</title>', self.html)
         if m is None:
             self.error(_("Video title not found"))
 
         name = m.group(1)
 
-        # replace unwanted characters in filename
-        if self.getConfig('filename_spaces'):
+        #: Replace unwanted characters in filename
+        if self.get_config('filename_spaces'):
             pattern = '[^\w ]+'
         else:
             pattern = '[^\w.]+'
 
-        return re.sub(pattern, self.getConfig('replacement_char'), name) + '.avi'
+        return re.sub(pattern, self.get_config('replacement_char'), name) + '.avi'
 
 
     def get_file_url(self):
-        """ returns the absolute downloadable filepath
+        """
+        Returns the absolute downloadable filepath
         """
         if not self.html:
             self.download_html()
 
-        m = re.search(r'<embed type="video/divx" src="(http://([^/]*\.)?veehd\.com/dl/[^"]+)"',
+        m = re.search(r'<embed type="video/divx" src="(http://([^/]*\.)?veehd\.com/dl/.+?)"',
                           self.html)
         if m is None:
             self.error(_("Embedded video url not found"))

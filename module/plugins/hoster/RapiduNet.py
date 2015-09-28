@@ -1,31 +1,32 @@
 # -*- coding: utf-8 -*-
 
+import pycurl
 import re
-
-from pycurl import HTTPHEADER
-from time import time, altzone
+import time
 
 from module.common.json_layer import json_loads
-from module.plugins.internal.CaptchaService import ReCaptcha
+from module.plugins.captcha.ReCaptcha import ReCaptcha
 from module.plugins.internal.SimpleHoster import SimpleHoster, create_getInfo
 
 
 class RapiduNet(SimpleHoster):
     __name__    = "RapiduNet"
     __type__    = "hoster"
-    __version__ = "0.02"
+    __version__ = "0.10"
+    __status__  = "testing"
 
     __pattern__ = r'https?://(?:www\.)?rapidu\.net/(?P<ID>\d{10})'
+    __config__  = [("use_premium", "bool", "Use premium account if available", True)]
 
     __description__ = """Rapidu.net hoster plugin"""
     __license__     = "GPLv3"
-    __authors__     = [("prOq", None)]
+    __authors__     = [("prOq", "")]
 
 
     COOKIES = [("rapidu.net", "rapidu_lang", "en")]
 
-    FILE_INFO_PATTERN = r'<h1 title="(?P<N>.*)">.*</h1>\s*<small>(?P<S>\d+(\.\d+)?)\s(?P<U>\w+)</small>'
-    OFFLINE_PATTERN   = r'404 - File not found'
+    INFO_PATTERN    = r'<h1 title="(?P<N>.*)">.*</h1>\s*<small>(?P<S>\d+(\.\d+)?)\s(?P<U>\w+)</small>'
+    OFFLINE_PATTERN = r'<h1>404'
 
     ERROR_PATTERN = r'<div class="error">'
 
@@ -33,48 +34,48 @@ class RapiduNet(SimpleHoster):
 
 
     def setup(self):
-        self.resumeDownload = True
-        self.multiDL        = True
-        self.limitDL        = 0 if self.premium else 2
+        self.resume_download = True
+        self.multiDL        = self.premium
 
 
-    def handleFree(self):
-        self.req.http.lastURL = self.pyfile.url
-        self.req.http.c.setopt(HTTPHEADER, ["X-Requested-With: XMLHttpRequest"])
+    def handle_free(self, pyfile):
+        self.req.http.lastURL = pyfile.url
+        self.req.http.c.setopt(pycurl.HTTPHEADER, ["X-Requested-With: XMLHttpRequest"])
 
-        jsvars = self.getJsonResponse("https://rapidu.net/ajax.php?a=getLoadTimeToDownload", {'_go': None})
+        jsvars = self.get_json_response("https://rapidu.net/ajax.php",
+                                      get={'a': "getLoadTimeToDownload"},
+                                      post={'_go': ""})
 
-        if str(jsvars['timeToDownload']) is "stop":
-            t = (24 * 60 * 60) - (int(time()) % (24 *60 * 60)) + altzone
+        if str(jsvars['timeToDownload']) == "stop":
+            t = (24 * 60 * 60) - (int(time.time()) % (24 * 60 * 60)) + time.altzone
 
-            self.logInfo("You've reach your daily download transfer")
+            self.log_info(_("You've reach your daily download transfer"))
 
-            self.retry(10,  10 if t < 1 else None, "Try tomorrow again")  #@NOTE: check t in case of not synchronised clock
+            self.retry(10, 10 if t < 1 else None, _("Try tomorrow again"))  #@NOTE: check t in case of not synchronised clock
 
         else:
-            self.wait(int(jsvars['timeToDownload']) - int(time()))
+            self.wait(int(jsvars['timeToDownload']) - int(time.time()))
 
         recaptcha = ReCaptcha(self)
+        response, challenge = recaptcha.challenge(self.RECAPTCHA_KEY)
 
-        for _i in xrange(10):
-            challenge, response = recaptcha.challenge(self.RECAPTCHA_KEY)
+        jsvars = self.get_json_response("https://rapidu.net/ajax.php",
+                                      get={'a': "getCheckCaptcha"},
+                                      post={'_go'     : "",
+                                            'captcha1': challenge,
+                                            'captcha2': response,
+                                            'fileId'  : self.info['pattern']['ID']})
 
-            jsvars = self.getJsonResponse("https://rapidu.net/ajax.php?a=getCheckCaptcha",
-                                          {'_go'     : None,
-                                           'captcha1': challenge,
-                                           'captcha2': response,
-                                           'fileId'  : self.info['ID']})
-            if jsvars['message'] == 'success':
-                self.download(jsvars['url'])
-                break
+        if jsvars['message'] == "success":
+            self.link = jsvars['url']
 
 
-    def getJsonResponse(self, url, post_data):
-        res = self.load(url, post=post_data, decode=True)
+    def get_json_response(self, *args, **kwargs):
+        res = self.load(*args, **kwargs)
         if not res.startswith('{'):
             self.retry()
 
-        self.logDebug(url, res)
+        self.log_debug(res)
 
         return json_loads(res)
 

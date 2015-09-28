@@ -7,26 +7,25 @@
 # http://letitbit.net/download/07874.0b5709a7d3beee2408bb1f2eefce/random.bin.html
 
 import re
-
-from urllib import urlencode, urlopen
-from urlparse import urljoin
+import urlparse
 
 from module.common.json_layer import json_loads, json_dumps
-from module.plugins.internal.CaptchaService import ReCaptcha
-from module.plugins.internal.SimpleHoster import SimpleHoster, secondsToMidnight
+from module.network.RequestFactory import getURL as get_url
+from module.plugins.captcha.ReCaptcha import ReCaptcha
+from module.plugins.internal.SimpleHoster import SimpleHoster, seconds_to_midnight
 
 
-def api_download_info(url):
-    json_data = ["yw7XQy2v9", ["download/info", {"link": url}]]
-    post_data = urlencode({'r': json_dumps(json_data)})
-    api_rep = urlopen("http://api.letitbit.net/json", data=post_data).read()
+def api_response(url):
+    json_data = ["yw7XQy2v9", ["download/info", {'link': url}]]
+    api_rep   = get_url("http://api.letitbit.net/json",
+                        post={'r': json_dumps(json_data)})
     return json_loads(api_rep)
 
 
-def getInfo(urls):
+def get_info(urls):
     for url in urls:
-        api_rep = api_download_info(url)
-        if api_rep['status'] == 'OK':
+        api_rep = api_response(url)
+        if api_rep['status'] == "OK":
             info = api_rep['data'][0]
             yield (info['name'], info['size'], 2, url)
         else:
@@ -36,9 +35,11 @@ def getInfo(urls):
 class LetitbitNet(SimpleHoster):
     __name__    = "LetitbitNet"
     __type__    = "hoster"
-    __version__ = "0.27"
+    __version__ = "0.32"
+    __status__  = "testing"
 
     __pattern__ = r'https?://(?:www\.)?(letitbit|shareflare)\.net/download/.+'
+    __config__  = [("use_premium", "bool", "Use premium account if available", True)]
 
     __description__ = """Letitbit.net hoster plugin"""
     __license__     = "GPLv3"
@@ -53,89 +54,84 @@ class LetitbitNet(SimpleHoster):
 
 
     def setup(self):
-        self.resumeDownload = True
+        self.resume_download = True
 
 
-    def getFileInfo(self):
-        api_rep = api_download_info(self.pyfile.url)
-        if api_rep['status'] == 'OK':
-            self.api_data = api_rep['data'][0]
-            self.pyfile.name = self.api_data['name']
-            self.pyfile.size = self.api_data['size']
-        else:
-            self.offline()
-
-
-    def handleFree(self):
-        action, inputs = self.parseHtmlForm('id="ifree_form"')
+    def handle_free(self, pyfile):
+        action, inputs = self.parse_html_form('id="ifree_form"')
         if not action:
             self.error(_("ifree_form"))
 
-        self.pyfile.size = float(inputs['sssize'])
-        self.logDebug(action, inputs)
+        pyfile.size = float(inputs['sssize'])
+        self.log_debug(action, inputs)
         inputs['desc'] = ""
 
-        self.html = self.load(urljoin("http://letitbit.net/", action), post=inputs, cookies=True)
+        self.html = self.load(urlparse.urljoin("http://letitbit.net/", action), post=inputs)
 
         m = re.search(self.SECONDS_PATTERN, self.html)
         seconds = int(m.group(1)) if m else 60
-        self.logDebug("Seconds found", seconds)
+
+        self.log_debug("Seconds found", seconds)
+
         m = re.search(self.CAPTCHA_CONTROL_FIELD, self.html)
         recaptcha_control_field = m.group(1)
-        self.logDebug("ReCaptcha control field found", recaptcha_control_field)
+
+        self.log_debug("ReCaptcha control field found", recaptcha_control_field)
+
         self.wait(seconds)
 
-        res = self.load("http://letitbit.net/ajax/download3.php", post=" ", cookies=True)
+        res = self.load("http://letitbit.net/ajax/download3.php", post=" ")
         if res != '1':
             self.error(_("Unknown response - ajax_check_url"))
-        self.logDebug(res)
+
+        self.log_debug(res)
 
         recaptcha = ReCaptcha(self)
-        challenge, response = recaptcha.challenge()
+        response, challenge = recaptcha.challenge()
 
-        post_data = {"recaptcha_challenge_field": challenge,
-                     "recaptcha_response_field": response,
-                     "recaptcha_control_field": recaptcha_control_field}
-        self.logDebug("Post data to send", post_data)
-        res = self.load("http://letitbit.net/ajax/check_recaptcha.php", post=post_data, cookies=True)
-        self.logDebug(res)
+        post_data = {'recaptcha_challenge_field': challenge,
+                     'recaptcha_response_field': response,
+                     'recaptcha_control_field': recaptcha_control_field}
+
+        self.log_debug("Post data to send", post_data)
+
+        res = self.load("http://letitbit.net/ajax/check_recaptcha.php", post=post_data)
+
+        self.log_debug(res)
+
         if not res:
-            self.invalidCaptcha()
+            self.captcha.invalid()
+
         if res == "error_free_download_blocked":
-            self.logWarning(_("Daily limit reached"))
-            self.wait(secondsToMidnight(gmt=2), True)
+            self.log_warning(_("Daily limit reached"))
+            self.wait(seconds_to_midnight(gmt=2), True)
+
         if res == "error_wrong_captcha":
-            self.invalidCaptcha()
+            self.captcha.invalid()
             self.retry()
+
         elif res.startswith('['):
             urls = json_loads(res)
+
         elif res.startswith('http://'):
             urls = [res]
+
         else:
             self.error(_("Unknown response - captcha check"))
 
-        self.correctCaptcha()
-
-        for download_url in urls:
-            try:
-                self.download(download_url)
-                break
-            except Exception, e:
-                self.logError(e)
-        else:
-            self.fail(_("Download did not finish correctly"))
+        self.link = urls[0]
 
 
-    def handlePremium(self):
+    def handle_premium(self, pyfile):
         api_key = self.user
-        premium_key = self.account.getAccountData(self.user)['password']
+        premium_key = self.account.get_info(self.user)['login']['password']
 
-        json_data = [api_key, ["download/direct_links", {"pass": premium_key, "link": self.pyfile.url}]]
+        json_data = [api_key, ["download/direct_links", {'pass': premium_key, 'link': pyfile.url}]]
         api_rep = self.load('http://api.letitbit.net/json', post={'r': json_dumps(json_data)})
-        self.logDebug("API Data: " + api_rep)
+        self.log_debug("API Data: " + api_rep)
         api_rep = json_loads(api_rep)
 
-        if api_rep['status'] == 'FAIL':
+        if api_rep['status'] == "FAIL":
             self.fail(api_rep['data'])
 
-        self.download(api_rep['data'][0][0], disposition=True)
+        self.link = api_rep['data'][0][0]

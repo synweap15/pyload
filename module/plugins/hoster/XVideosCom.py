@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
 
 import re
+import urllib
 
-from urllib import unquote
-
-from module.plugins.Hoster import Hoster
+from module.plugins.internal.Hoster import Hoster
 
 
 class XVideosCom(Hoster):
     __name__    = "XVideos.com"
     __type__    = "hoster"
-    __version__ = "0.10"
+    __version__ = "0.12"
+    __status__  = "testing"
 
     __pattern__ = r'http://(?:www\.)?xvideos\.com/video(\d+)'
 
@@ -25,4 +25,4 @@ class XVideosCom(Hoster):
             re.search(r"<h2>([^<]+)<span", site).group(1),
             re.match(self.__pattern__, pyfile.url).group(1),
         )
-        self.download(unquote(re.search(r"flv_url=([^&]+)&", site).group(1)))
+        self.download(urllib.unquote(re.search(r"flv_url=([^&]+)&", site).group(1)))

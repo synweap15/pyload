@@ -8,9 +8,11 @@ from module.plugins.internal.SimpleHoster import SimpleHoster, create_getInfo
 class CloudzillaTo(SimpleHoster):
     __name__    = "CloudzillaTo"
     __type__    = "hoster"
-    __version__ = "0.05"
+    __version__ = "0.09"
+    __status__  = "testing"
 
     __pattern__ = r'http://(?:www\.)?cloudzilla\.to/share/file/(?P<ID>[\w^_]+)'
+    __config__  = [("use_premium", "bool", "Use premium account if available", True)]
 
     __description__ = """Cloudzilla.to hoster plugin"""
     __license__     = "GPLv3"
@@ -23,39 +25,44 @@ class CloudzillaTo(SimpleHoster):
     PASSWORD_PATTERN = r'<div id="pwd_protected">'
 
 
-    def checkErrors(self):
-        m = re.search(self.PASSWORD_PATTERN, self.html)
-        if m:
-            self.html = self.load(self.pyfile.url, get={'key': self.getPassword()})
+    def check_errors(self):
+        if re.search(self.PASSWORD_PATTERN, self.html):
+            pw = self.get_password()
+            if pw:
+                self.html = self.load(self.pyfile.url, get={'key': pw})
+            else:
+                self.fail(_("Missing password"))
 
         if re.search(self.PASSWORD_PATTERN, self.html):
-            self.retry(reason="Wrong password")
+            self.retry(msg="Wrong password")
+        else:
+            return super(CloudzillaTo, self).check_errors()
 
 
-    def handleFree(self):
+    def handle_free(self, pyfile):
         self.html = self.load("http://www.cloudzilla.to/generateticket/",
-                              post={'file_id': self.info['pattern']['ID'], 'key': self.getPassword()})
+                              post={'file_id': self.info['pattern']['ID'], 'key': self.get_password()})
 
         ticket = dict(re.findall(r'<(.+?)>([^<>]+?)</', self.html))
 
-        self.logDebug(ticket)
+        self.log_debug(ticket)
 
         if 'error' in ticket:
             if "File is password protected" in ticket['error']:
-                self.retry(reason="Wrong password")
+                self.retry(msg="Wrong password")
             else:
                 self.fail(ticket['error'])
 
         if 'wait' in ticket:
-            self.wait(int(ticket['wait']), int(ticket['wait']) > 5)
+            self.wait(ticket['wait'], int(ticket['wait']) > 5)
 
         self.link = "http://%(server)s/download/%(file_id)s/%(ticket_id)s" % {'server'   : ticket['server'],
                                                                               'file_id'  : self.info['pattern']['ID'],
                                                                               'ticket_id': ticket['ticket_id']}
 
 
-    def handlePremium(self):
-        return self.handleFree()
+    def handle_premium(self, pyfile):
+        return self.handle_free(pyfile)
 
 
 getInfo = create_getInfo(CloudzillaTo)

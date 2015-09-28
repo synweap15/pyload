@@ -1,81 +1,85 @@
 # -*- coding: utf-8 -*-
 
-from datetime import datetime
+import datetime
 import hashlib
+import time
 
-from module.plugins.Account import Account
-from time import mktime
-from module.common.json_layer import json_loads as loads
+from module.common.json_layer import json_loads
+from module.plugins.internal.Account import Account
 
 
 class NoPremiumPl(Account):
-    __name__ = "NoPremiumPl"
-    __version__ = "0.01"
-    __type__ = "account"
+    __name__    = "NoPremiumPl"
+    __type__    = "account"
+    __version__ = "0.05"
+    __status__  = "testing"
+
     __description__ = "NoPremium.pl account plugin"
-    __license__ = "GPLv3"
-    __authors__ = [("goddie", "dev@nopremium.pl")]
+    __license__     = "GPLv3"
+    __authors__     = [("goddie", "dev@nopremium.pl")]
 
-    _api_url = "http://crypt.nopremium.pl"
 
-    _api_query = {
-        "site": "nopremium",
-        "username": "",
-        "password": "",
-        "output": "json",
-        "loc": "1",
-        "info": "1"
-    }
+    API_URL   = "http://crypt.nopremium.pl"
+    API_QUERY = {'site'    : "nopremium",
+                 'username': ""         ,
+                 'password': ""         ,
+                 'output'  : "json"     ,
+                 'loc'     : "1"        ,
+                 'info'    : "1"        }
 
     _req = None
     _usr = None
     _pwd = None
 
-    def loadAccountInfo(self, name, req):
+
+    def grab_info(self, user, password, data, req):
         self._req = req
         try:
-            result = loads(self.runAuthQuery())
-        except:
-            # todo: return or let it be thrown?
+            result = json_loads(self.run_auth_query())
+
+        except Exception:
+            #@TODO: return or let it be thrown?
             return
 
         premium = False
         valid_untill = -1
 
-        if "expire" in result.keys() and result["expire"]:
+        if "expire" in result.keys() and result['expire']:
             premium = True
-            valid_untill = mktime(datetime.fromtimestamp(int(result["expire"])).timetuple())
-        traffic_left = result["balance"] * 1024
+            valid_untill = time.mktime(datetime.datetime.fromtimestamp(int(result['expire'])).timetuple())
 
-        return ({
-                    "validuntil": valid_untill,
-                    "trafficleft": traffic_left,
-                    "premium": premium
-                })
+        traffic_left = result['balance'] * 1024
 
-    def login(self, user, data, req):
+        return {'validuntil' : valid_untill,
+                'trafficleft': traffic_left,
+                'premium'    : premium     }
+
+
+    def login(self, user, password, data, req):
         self._usr = user
-        self._pwd = hashlib.sha1(hashlib.md5(data["password"]).hexdigest()).hexdigest()
+        self._pwd = hashlib.sha1(hashlib.md5(password).hexdigest()).hexdigest()
         self._req = req
 
         try:
-            response = loads(self.runAuthQuery())
-        except:
-            self.wrongPassword()
+            response = json_loads(self.run_auth_query())
+
+        except Exception:
+            self.fail_login()
 
         if "errno" in response.keys():
-            self.wrongPassword()
+            self.fail_login()
+
         data['usr'] = self._usr
         data['pwd'] = self._pwd
 
-    def createAuthQuery(self):
-        query = self._api_query
-        query["username"] = self._usr
-        query["password"] = self._pwd
 
+    def create_auth_query(self):
+        query = self.API_QUERY
+        query['username'] = self._usr
+        query['password'] = self._pwd
         return query
 
-    def runAuthQuery(self):
-        data = self._req.load(self._api_url, post=self.createAuthQuery())
 
-        return data
+    def run_auth_query(self):
+        return self.load(self.API_URL,
+                         post=self.create_auth_query())

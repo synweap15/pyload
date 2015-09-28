@@ -2,28 +2,23 @@
 
 import re
 
-from urlparse import urlparse
-
-from module.plugins.Crypter import Crypter
-from module.plugins.internal.SimpleHoster import SimpleHoster, create_getInfo, replace_patterns, set_cookies
-from module.utils import fixup
+from module.plugins.internal.Crypter import Crypter
+from module.plugins.internal.SimpleHoster import SimpleHoster, create_getInfo, replace_patterns, set_cookie, set_cookies
 
 
 class SimpleCrypter(Crypter, SimpleHoster):
     __name__    = "SimpleCrypter"
     __type__    = "crypter"
-    __version__ = "0.36"
+    __version__ = "0.62"
+    __status__  = "testing"
 
     __pattern__ = r'^unmatchable$'
-    __config__  = [("use_subfolder", "bool", "Save package to subfolder", True),  #: Overrides core.config['general']['folder_per_package']
-                   ("subfolder_per_package", "bool", "Create a subfolder for each package", True)]
+    __config__  = [("use_subfolder"     , "bool", "Save package to subfolder"          , True),
+                   ("subfolder_per_pack", "bool", "Create a subfolder for each package", True)]
 
     __description__ = """Simple decrypter plugin"""
     __license__     = "GPLv3"
-    __authors__     = [("stickell", "l.stickell@yahoo.it"),
-                       ("zoidberg", "zoidberg@mujmail.cz"),
-                       ("Walter Purcaro", "vuolter@gmail.com")]
-
+    __authors__     = [("Walter Purcaro", "vuolter@gmail.com")]
 
     """
     Following patterns should be defined by each crypter:
@@ -52,92 +47,85 @@ class SimpleCrypter(Crypter, SimpleHoster):
     and its loadPage method:
 
 
-      def loadPage(self, page_n):
+      def load_page(self, page_n):
           return the html of the page number page_n
     """
 
-    LINK_PATTERN = None
-
-    NAME_REPLACEMENTS = [("&#?\w+;", fixup)]
-    URL_REPLACEMENTS  = []
-
-    TEXT_ENCODING = False  #: Set to True or encoding name if encoding in http header is not correct
-    COOKIES       = True  #: or False or list of tuples [(domain, name, value)]
-
-    LOGIN_ACCOUNT = False
-    LOGIN_PREMIUM = False
+    DIRECT_LINK  = True
+    LEECH_HOSTER = False
 
 
     #@TODO: Remove in 0.4.10
-    def init(self):
-        account_name = (self.__name__ + ".py").replace("Folder.py", "").replace(".py", "")
-        account = self.core.accountManager.getAccountPlugin(account_name)
+    def _setup(self):
+        orig_name = self.__name__
+        self.__name__ = (orig_name + ".py").replace("Folder.py", "").replace(".py", "")
 
-        if account and account.canUse():
-            self.user, data = account.selectAccount()
-            self.req = account.getAccountRequest(self.user)
-            self.premium = account.isPremium(self.user)
+        super(SimpleCrypter, self)._setup()
 
-            self.account = account
+        self.__name__ = orig_name
+
+
+    #@TODO: Remove in 0.4.10
+    def load_account(self):
+        orig_name = self.__name__
+        self.__name__ = (orig_name + ".py").replace("Folder.py", "").replace(".py", "")
+
+        super(SimpleCrypter, self).load_account()
+
+        self.__name__ = orig_name
+
+
+    def handle_direct(self, pyfile):
+        for i in xrange(self.get_config("maxredirs", plugin="UserAgentSwitcher")):
+            redirect = self.link or pyfile.url
+            self.log_debug("Redirect #%d to: %s" % (i, redirect))
+
+            header = self.load(redirect, just_header=True)
+            if 'location' in header and header['location']:
+                self.link = header['location']
+            else:
+                break
+        else:
+            self.log_error(_("Too many redirects"))
 
 
     def prepare(self):
-        self.info  = {}
-        self.links = []  #@TODO: Move to hoster class in 0.4.10
-
-        if self.LOGIN_PREMIUM and not self.premium:
-            self.fail(_("Required premium account not found"))
-
-        if self.LOGIN_ACCOUNT and not self.account:
-            self.fail(_("Required account not found"))
-
-        self.req.setOption("timeout", 120)
-
-        if isinstance(self.COOKIES, list):
-            set_cookies(self.req.cj, self.COOKIES)
-
-        self.pyfile.url = replace_patterns(self.pyfile.url, self.URL_REPLACEMENTS)
+        self.links = []
+        return super(SimpleCrypter, self).prepare()
 
 
     def decrypt(self, pyfile):
         self.prepare()
+        self.check_info()  #@TODO: Remove in 0.4.10
 
-        self.preload()
-        self.checkInfo()
+        if self.direct_dl:
+            self.log_debug(_("Looking for direct download link..."))
+            self.handle_direct(pyfile)
 
-        self.links = self.getLinks()
+            if self.link or self.links or self.urls or self.packages:
+                self.log_info(_("Direct download link detected"))
+            else:
+                self.log_info(_("Direct download link not found"))
 
-        if hasattr(self, 'PAGES_PATTERN') and hasattr(self, 'loadPage'):
-            self.handleMultiPages()
+        if not (self.link or self.links or self.urls or self.packages):
+            self.preload()
 
-        self.logDebug("Package has %d links" % len(self.links))
+            self.links = self.get_links() or list()
+
+            if hasattr(self, 'PAGES_PATTERN') and hasattr(self, 'loadPage'):
+                self.handle_pages(pyfile)
+
+            self.log_debug("Package has %d links" % len(self.links))
+
+        if self.link:
+            self.urls.append(self.link)
 
         if self.links:
-            self.packages = [(self.info['name'], self.links, self.info['folder'])]
-
-        elif not self.urls and not self.packages:  #@TODO: Remove in 0.4.10
-            self.fail("No link grabbed")
+            name = folder = pyfile.name
+            self.packages.append((name, self.links, folder))
 
 
-    def checkNameSize(self, getinfo=True):
-        if getinfo:
-            self.updateInfo(self.getInfo(self.pyfile.url, self.html))
-
-        name = self.info['name']
-        url  = self.info['url']
-
-        if name and name != url:
-            self.pyfile.name = name
-        else:
-            self.pyfile.name = self.info['name'] = urlparse(name).path.split('/')[-1]
-
-        folder = self.info['folder'] = self.pyfile.name
-
-        self.logDebug("File name: %s" % self.pyfile.name,
-                      "File folder: %s" % folder)
-
-
-    def getLinks(self):
+    def get_links(self):
         """
         Returns the links extracted from self.html
         You should override this only if it's impossible to extract links using only the LINK_PATTERN.
@@ -145,13 +133,13 @@ class SimpleCrypter(Crypter, SimpleHoster):
         return re.findall(self.LINK_PATTERN, self.html)
 
 
-    def handleMultiPages(self):
+    def handle_pages(self, pyfile):
         try:
-            m = re.search(self.PAGES_PATTERN, self.html)
-            pages = int(m.group(1))
-        except:
+            pages = int(re.search(self.PAGES_PATTERN, self.html).group(1))
+
+        except AttributeError:
             pages = 1
 
         for p in xrange(2, pages + 1):
-            self.html = self.loadPage(p)
-            self.links += self.getLinks()
+            self.html = self.load_page(p)
+            self.links += self.get_links()

@@ -1,56 +1,61 @@
 # -*- coding: utf-8 -*-
 
 import re
+import time
 
-from time import mktime, strptime
-
-from module.plugins.Account import Account
+from module.plugins.internal.Account import Account
 
 
 class CatShareNet(Account):
     __name__    = "CatShareNet"
     __type__    = "account"
-    __version__ = "0.01"
+    __version__ = "0.09"
+    __status__  = "testing"
 
-    __description__ = """CatShareNet account plugin"""
+    __description__ = """Catshare.net account plugin"""
     __license__     = "GPLv3"
     __authors__     = [("prOq", None)]
 
 
-    PREMIUM_PATTERN = r'class="nav-collapse collapse pull-right">[\s\w<>=-."/:]*\sz.</a></li>\s*<li><a href="/premium">.*\s*<span style="color: red">(.*?)</span>[\s\w<>/]*href="/logout"'
-    VALID_UNTIL_PATTERN = r'<div class="span6 pull-right">[\s\w<>=-":;]*<span style="font-size:13px;">.*?<strong>(.*?)</strong></span>'
+    PREMIUM_PATTERN      = r'<a href="/premium">Konto:[\s\n]*Premium'
+    VALID_UNTIL_PATTERN  = r'>Konto premium.*?<strong>(.*?)</strong></span>'
+    TRAFFIC_LEFT_PATTERN = r'<a href="/premium">([0-9.]+ [kMG]B)'
 
 
-    def loadAccountInfo(self, user, req):
-        premium = False
-        validuntil = -1
+    def grab_info(self, user, password, data, req):
+        premium     = False
+        validuntil  = -1
+        trafficleft = -1
 
-        html = req.load("http://catshare.net/", decode=True)
+        html = self.load("http://catshare.net/")
+
+        if re.search(self.PREMIUM_PATTERN, html):
+            premium = True
 
         try:
-            m = re.search(self.PREMIUM_PATTERN, html)
-            if "Premium" in m.group(1):
-                premium = True
-        except:
+            expiredate = re.search(self.VALID_UNTIL_PATTERN, html).group(1)
+            self.log_debug("Expire date: " + expiredate)
+
+            validuntil = time.mktime(time.strptime(expiredate, "%Y-%m-%d %H:%M:%S"))
+
+        except Exception:
             pass
 
         try:
-            m = re.search(self.VALID_UNTIL_PATTERN, html)
-            expiredate = m.group(1)
-            if "-" not in expiredate:
-                validuntil = mktime(strptime(expiredate, "%d.%m.%Y"))
-        except:
+            trafficleft = self.parse_traffic(re.search(self.TRAFFIC_LEFT_PATTERN, html).group(1))
+
+        except Exception:
             pass
 
-        return {'premium': premium, 'trafficleft': -1, 'validuntil': validuntil}
+        return {'premium': premium, 'trafficleft': trafficleft, 'validuntil': validuntil}
 
 
-    def login(self, user, data, req):
-        html = req.load("http://catshare.net/login",
-                        post={'user_email': user,
-                              'user_password': data['password'],
-                              'remindPassword': 0,
-                              'user[submit]': "Login"})
+    def login(self, user, password, data, req):
+        html = self.load("http://catshare.net/login",  #@TODO: Revert to `https` in 0.4.10
+                         post={'user_email'    : user,
+                               'user_password' : password,
+                               'remindPassword': 0,
+                               'user[submit]'  : "Login"})
 
         if not '<a href="/logout">Wyloguj</a>' in html:
-            self.wrongPassword()
+            self.fail_login()

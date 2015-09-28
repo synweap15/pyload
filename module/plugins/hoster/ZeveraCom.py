@@ -1,42 +1,31 @@
 # -*- coding: utf-8 -*-
 
+import re
+
 from module.plugins.internal.MultiHoster import MultiHoster, create_getInfo
 
 
 class ZeveraCom(MultiHoster):
     __name__    = "ZeveraCom"
     __type__    = "hoster"
-    __version__ = "0.25"
+    __version__ = "0.32"
+    __status__  = "testing"
 
-    __pattern__ = r'http://(?:www\.)?zevera\.com/.+'
+    __pattern__ = r'https?://(?:www\.)zevera\.com/(getFiles\.ashx|Members/download\.ashx)\?.*ourl=.+'
+    __config__  = [("use_premium" , "bool", "Use premium account if available"    , True),
+                   ("revertfailed", "bool", "Revert to standard download if fails", True)]
 
-    __description__ = """Zevera.com hoster plugin"""
+    __description__ = """Zevera.com multi-hoster plugin"""
     __license__     = "GPLv3"
-    __authors__     = [("zoidberg", "zoidberg@mujmail.cz")]
+    __authors__     = [("zoidberg", "zoidberg@mujmail.cz"),
+                       ("Walter Purcaro", "vuolter@gmail.com")]
 
 
-    def setup(self):
-        self.resumeDownload = True
-        self.multiDL        = True
-        self.chunkLimit     = 1
+    FILE_ERRORS = [("Error", r'action="ErrorDownload.aspx')]
 
 
-    def handlePremium(self):
-        if self.account.getAPIData(self.req, cmd="checklink", olink=self.pyfile.url) != "Alive":
-            self.fail(_("Offline or not downloadable"))
-
-        header = self.account.getAPIData(self.req, just_header=True, cmd="generatedownloaddirect", olink=self.pyfile.url)
-        if not "location" in header:
-            self.fail(_("Unable to initialize download"))
-
-        self.link = header['location']
-
-
-    def checkFile(self):
-        super(ZeveraCom, self).checkFile()
-
-        if self.checkDownload({"error": 'action="ErrorDownload.aspx'}) is "error":
-            self.fail(_("Error response received - contact Zevera support"))
+    def handle_premium(self, pyfile):
+        self.link = "https://%s/getFiles.ashx?ourl=%s" % (self.account.HOSTER_DOMAIN, pyfile.url)
 
 
 getInfo = create_getInfo(ZeveraCom)

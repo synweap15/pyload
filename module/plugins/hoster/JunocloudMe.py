@@ -6,7 +6,8 @@ from module.plugins.internal.XFSHoster import XFSHoster, create_getInfo
 class JunocloudMe(XFSHoster):
     __name__    = "JunocloudMe"
     __type__    = "hoster"
-    __version__ = "0.05"
+    __version__ = "0.06"
+    __status__  = "testing"
 
     __pattern__ = r'http://(?:\w+\.)?junocloud\.me/\w{12}'
 
@@ -14,8 +15,6 @@ class JunocloudMe(XFSHoster):
     __license__     = "GPLv3"
     __authors__     = [("guidobelix", "guidobelix@hotmail.it")]
 
-
-    HOSTER_DOMAIN = "junocloud.me"
 
     URL_REPLACEMENTS = [(r'//(www\.)?junocloud', "//dl3.junocloud")]
 

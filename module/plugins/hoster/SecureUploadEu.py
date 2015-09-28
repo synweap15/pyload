@@ -6,7 +6,8 @@ from module.plugins.internal.XFSHoster import XFSHoster, create_getInfo
 class SecureUploadEu(XFSHoster):
     __name__    = "SecureUploadEu"
     __type__    = "hoster"
-    __version__ = "0.05"
+    __version__ = "0.06"
+    __status__  = "testing"
 
     __pattern__ = r'https?://(?:www\.)?secureupload\.eu/\w{12}'
 
@@ -14,8 +15,6 @@ class SecureUploadEu(XFSHoster):
     __license__     = "GPLv3"
     __authors__     = [("z00nx", "z00nx0@gmail.com")]
 
-
-    HOSTER_DOMAIN = "secureupload.eu"
 
     INFO_PATTERN = r'<h3>Downloading (?P<N>[^<]+) \((?P<S>[^<]+)\)</h3>'
 

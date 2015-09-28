@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-from urllib import quote, unquote
+import urllib
 
 from module.plugins.internal.MultiHoster import MultiHoster, create_getInfo
 
@@ -8,34 +8,23 @@ from module.plugins.internal.MultiHoster import MultiHoster, create_getInfo
 class RehostTo(MultiHoster):
     __name__    = "RehostTo"
     __type__    = "hoster"
-    __version__ = "0.16"
+    __version__ = "0.23"
+    __status__  = "testing"
 
     __pattern__ = r'https?://.*rehost\.to\..+'
+    __config__  = [("use_premium" , "bool", "Use premium account if available"    , True),
+                   ("revertfailed", "bool", "Revert to standard download if fails", True)]
 
-    __description__ = """Rehost.com hoster plugin"""
+    __description__ = """Rehost.com multi-hoster plugin"""
     __license__     = "GPLv3"
     __authors__     = [("RaNaN", "RaNaN@pyload.org")]
 
 
-    def getFilename(self, url):
-        return unquote(url.rsplit("/", 1)[1])
-
-
-    def setup(self):
-        self.chunkLimit     = 1
-        self.resumeDownload = True
-
-
-    def handlePremium(self):
-        data = self.account.getAccountInfo(self.user)
-        long_ses = data['long_ses']
-
-        #raise timeout to 2min
-        self.req.setOption("timeout", 120)
-
-        self.link = True
+    def handle_premium(self, pyfile):
         self.download("http://rehost.to/process_download.php",
-                      get={'user': "cookie", 'pass': long_ses, 'dl': quote(self.pyfile.url, "")},
+                      get={'user': "cookie",
+                           'pass': self.account.get_data(self.user)['session'],
+                           'dl'  : pyfile.url},
                       disposition=True)
 
 

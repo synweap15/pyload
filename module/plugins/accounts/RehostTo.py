@@ -1,45 +1,58 @@
 # -*- coding: utf-8 -*-
 
-from module.plugins.Account import Account
+from module.plugins.internal.Account import Account
 
 
 class RehostTo(Account):
     __name__    = "RehostTo"
     __type__    = "account"
-    __version__ = "0.11"
+    __version__ = "0.19"
+    __status__  = "testing"
 
     __description__ = """Rehost.to account plugin"""
     __license__     = "GPLv3"
     __authors__     = [("RaNaN", "RaNaN@pyload.org")]
 
 
-    def loadAccountInfo(self, user, req):
-        data = self.getAccountData(user)
-        html = req.load("http://rehost.to/api.php",
-                        get={'cmd': "login", 'user': user, 'pass': data['password']})
-        data = [x.split("=") for x in html.split(",")]
-        ses = data[0][1]
-        long_ses = data[1][1]
+    def grab_info(self, user, password, data, req):
+        premium     = False
+        trafficleft = None
+        validuntil  = -1
+        session     = ""
 
-        html = req.load("http://rehost.to/api.php",
-                        get={'cmd': "get_premium_credits", 'long_ses': long_ses})
+        html = self.load("https://rehost.to/api.php",
+                        get={'cmd' : "login",
+                             'user': user,
+                             'pass': password})
+        try:
+            session = html.split(",")[1].split("=")[1]
 
-        traffic, valid = html.split(",")
+            html = self.load("http://rehost.to/api.php",
+                             get={'cmd'     : "get_premium_credits",
+                                  'long_ses': session})
 
-        trafficleft = self.parseTraffic(traffic + "MB")
-        validuntil  = float(valid)
+            if html.strip() == "0,0" or "ERROR" in html:
+                self.log_debug(html)
+            else:
+                traffic, valid = html.split(",")
 
-        account_info = {"trafficleft": trafficleft,
-                        "validuntil" : validuntil,
-                        "long_ses"   : long_ses,
-                        "ses"        : ses}
+                premium     = True
+                trafficleft = self.parse_traffic(traffic + "MB")
+                validuntil  = float(valid)
 
-        return account_info
+        finally:
+            return {'premium'    : premium,
+                    'trafficleft': trafficleft,
+                    'validuntil' : validuntil,
+                    'session'    : session}
 
 
-    def login(self, user, data, req):
-        html = req.load("http://rehost.to/api.php",
-                        get={'cmd': "login", 'user': user, 'pass': data['password']})
+    def login(self, user, password, data, req):
+        html = self.load("https://rehost.to/api.php",
+                         get={'cmd': "login",
+                              'user': user,
+                              'pass': password})
 
-        if "Login failed." in html:
-            self.wrongPassword()
+        if "ERROR" in html:
+            self.log_debug(html)
+            self.fail_login()

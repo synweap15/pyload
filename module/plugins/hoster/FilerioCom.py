@@ -6,7 +6,8 @@ from module.plugins.internal.XFSHoster import XFSHoster, create_getInfo
 class FilerioCom(XFSHoster):
     __name__    = "FilerioCom"
     __type__    = "hoster"
-    __version__ = "0.07"
+    __version__ = "0.08"
+    __status__  = "testing"
 
     __pattern__ = r'http://(?:www\.)?(filerio\.(in|com)|filekeen\.com)/\w{12}'
 
@@ -14,8 +15,6 @@ class FilerioCom(XFSHoster):
     __license__     = "GPLv3"
     __authors__     = [("zoidberg", "zoidberg@mujmail.cz")]
 
-
-    HOSTER_DOMAIN = "filerio.in"
 
     URL_REPLACEMENTS = [(r'filekeen\.com', "filerio.in")]
 

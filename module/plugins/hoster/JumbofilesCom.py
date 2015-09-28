@@ -8,9 +8,11 @@ from module.plugins.internal.SimpleHoster import SimpleHoster, create_getInfo
 class JumbofilesCom(SimpleHoster):
     __name__    = "JumbofilesCom"
     __type__    = "hoster"
-    __version__ = "0.02"
+    __version__ = "0.04"
+    __status__  = "testing"
 
-    __pattern__ = r'http://(?:www\.)?jumbofiles\.com/(\w{12})'
+    __pattern__ = r'http://(?:www\.)?jumbofiles\.com/(?P<ID>\w{12})'
+    __config__  = [("use_premium", "bool", "Use premium account if available", True)]
 
     __description__ = """JumboFiles.com hoster plugin"""
     __license__     = "GPLv3"
@@ -19,20 +21,18 @@ class JumbofilesCom(SimpleHoster):
 
     INFO_PATTERN = r'<TR><TD>(?P<N>[^<]+?)\s*<small>\((?P<S>[\d.,]+)\s*(?P<U>[\w^_]+)'
     OFFLINE_PATTERN = r'Not Found or Deleted / Disabled due to inactivity or DMCA'
-    LINK_PATTERN = r'<meta http-equiv="refresh" content="10;url=(.+)">'
+    LINK_FREE_PATTERN = r'<meta http-equiv="refresh" content="10;url=(.+)">'
 
 
     def setup(self):
-        self.resumeDownload = True
+        self.resume_download = True
         self.multiDL        = True
 
 
-    def handleFree(self):
-        ukey = re.match(self.__pattern__, self.pyfile.url).group(1)
-        post_data = {"id": ukey, "op": "download3", "rand": ""}
-        html = self.load(self.pyfile.url, post=post_data, decode=True)
-        url = re.search(self.LINK_PATTERN, html).group(1)
-        self.download(url)
+    def handle_free(self, pyfile):
+        post_data = {'id': self.info['pattern']['ID'], 'op': "download3", 'rand': ""}
+        html = self.load(self.pyfile.url, post=post_data)
+        self.link = re.search(self.LINK_FREE_PATTERN, html).group(1)
 
 
 getInfo = create_getInfo(JumbofilesCom)

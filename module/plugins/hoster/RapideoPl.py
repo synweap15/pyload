@@ -1,102 +1,106 @@
 # -*- coding: utf-8 -*-
 
-from module.common.json_layer import json_loads as loads
-from module.plugins.internal.SimpleHoster import SimpleHoster
+from module.common.json_layer import json_loads
+from module.plugins.internal.MultiHoster import MultiHoster
 
 
-class RapideoPl(SimpleHoster):
-    __name__ = "RapideoPl"
-    __version__ = "0.01"
-    __type__ = "hoster"
-    __description__ = "Rapideo.pl hoster plugin"
-    __license__ = "GPLv3"
-    __authors__ = [("goddie", "dev@rapideo.pl")]
+class RapideoPl(MultiHoster):
+    __name__    = "RapideoPl"
+    __type__    = "hoster"
+    __version__ = "0.04"
+    __status__  = "testing"
 
-    _api_url = "http://enc.rapideo.pl"
+    __pattern__ = r'^unmatchable$'
+    __config__  = [("use_premium" , "bool", "Use premium account if available"    , True),
+                   ("revertfailed", "bool", "Revert to standard download if fails", True)]
 
-    _api_query = {"site": "newrd",
-                  "output": "json",
-                  "username": "",
-                  "password": "",
-                  "url": ""}
+    __description__ = """Rapideo.pl multi-hoster plugin"""
+    __license__     = "GPLv3"
+    __authors__     = [("goddie", "dev@rapideo.pl")]
 
-    _error_codes = {
-        0: "[%s] Incorrect login credentials",
-        1: "[%s] Not enough transfer to download - top-up your account",
-        2: "[%s] Incorrect / dead link",
-        3: "[%s] Error connecting to hosting, try again later",
-        9: "[%s] Premium account has expired",
-        15: "[%s] Hosting no longer supported",
-        80: "[%s] Too many incorrect login attempts, account blocked for 24h"
-    }
 
-    _usr = False
-    _pwd = False
+    API_URL = "http://enc.rapideo.pl"
 
-    def setup(self):
-        self.resumeDownload = True
-        self.multiDL = True
+    API_QUERY = {'site'    : "newrd",
+                 'output'  : "json",
+                 'username': "",
+                 'password': "",
+                 'url'     : ""}
 
-    def get_username_password(self):
-        if not self.account:
-            self.fail(_("Please enter your %s account or deactivate this plugin") % "Rapideo.pl")
-        else:
-            self._usr = self.account.getAccountData(self.user).get('usr')
-            self._pwd = self.account.getAccountData(self.user).get('pwd')
+    ERROR_CODES = {0 : "[%s] Incorrect login credentials",
+                   1 : "[%s] Not enough transfer to download - top-up your account",
+                   2 : "[%s] Incorrect / dead link",
+                   3 : "[%s] Error connecting to hosting, try again later",
+                   9 : "[%s] Premium account has expired",
+                   15: "[%s] Hosting no longer supported",
+                   80: "[%s] Too many incorrect login attempts, account blocked for 24h"}
 
-    def runFileQuery(self, url, mode=None):
-        query = self._api_query.copy()
-        query["username"] = self._usr
-        query["password"] = self._pwd
-        query["url"] = url
+
+    def prepare(self):
+        super(RapideoPl, self).prepare()
+
+        data = self.account.get_data(self.user)
+
+        self.usr = data['usr']
+        self.pwd = data['pwd']
+
+
+    def run_file_query(self, url, mode=None):
+        query = self.API_QUERY.copy()
+
+        query['username'] = self.usr
+        query['password'] = self.pwd
+        query['url']      = url
 
         if mode == "fileinfo":
             query['check'] = 2
-            query['loc'] = 1
+            query['loc']   = 1
 
-        self.logDebug(query)
-        return self.load(self._api_url, post=query)
+        self.log_debug(query)
 
-    def process(self, pyfile):
-        self.get_username_password()
+        return self.load(self.API_URL, post=query)
+
+
+    def handle_free(self, pyfile):
         try:
-            data = self.runFileQuery(pyfile.url, 'fileinfo')
+            data = self.run_file_query(pyfile.url, 'fileinfo')
+
         except Exception:
-            self.logDebug("RunFileQuery error")
-            self.tempOffline()
+            self.log_debug("RunFileQuery error")
+            self.temp_offline()
 
         try:
-            parsed = loads(data)
-        except Exception:
-            self.logDebug("Loads error")
-            self.tempOffline()
+            parsed = json_loads(data)
 
-        self.logDebug(parsed)
+        except Exception:
+            self.log_debug("Loads error")
+            self.temp_offline()
+
+        self.log_debug(parsed)
 
         if "errno" in parsed.keys():
-            if parsed["errno"] in self._error_codes:
-                # error code in known
-                self.fail(self._error_codes[parsed["errno"]] % self.__name__)
+            if parsed['errno'] in self.ERROR_CODES:
+                #: Error code in known
+                self.fail(self.ERROR_CODES[parsed['errno']] % self.__name__)
             else:
-                # error code isn't yet added to plugin
+                #: Error code isn't yet added to plugin
                 self.fail(
-                    parsed["errstring"]
-                    or "Unknown error (code: %s)" % parsed["errno"]
+                    parsed['errstring']
+                    or _("Unknown error (code: %s)") % parsed['errno']
                 )
 
         if "sdownload" in parsed:
-            if parsed["sdownload"] == "1":
+            if parsed['sdownload'] == "1":
                 self.fail(
-                    "Download from %s is possible only using Rapideo.pl webiste \
-                    directly. Update this plugin." % parsed["hosting"])
+                    _("Download from %s is possible only using Rapideo.pl website \
+                    directly") % parsed['hosting'])
 
-        pyfile.name = parsed["filename"]
-        pyfile.size = parsed["filesize"]
+        pyfile.name = parsed['filename']
+        pyfile.size = parsed['filesize']
 
         try:
-            result_dl = self.runFileQuery(pyfile.url, 'filedownload')
-        except Exception:
-            self.logDebug("runFileQuery error #2")
-            self.tempOffline()
+            self.link = self.run_file_query(pyfile.url, 'filedownload')
 
-        self.download(result_dl, disposition=True)
+        except Exception:
+            self.log_debug("runFileQuery error #2")
+            self.temp_offline()

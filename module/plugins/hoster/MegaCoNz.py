@@ -1,18 +1,19 @@
 # -*- coding: utf-8 -*-
 
+import array
+import os
+# import pycurl
 import random
 import re
 
-from array import array
 from base64 import standard_b64decode
-from os import remove
 
 from Crypto.Cipher import AES
 from Crypto.Util import Counter
-# from pycurl import SSL_CIPHER_LIST
 
 from module.common.json_layer import json_loads, json_dumps
-from module.plugins.Hoster import Hoster
+from module.plugins.internal.Hoster import Hoster
+from module.utils import decode, fs_decode, fs_encode
 
 
 ############################ General errors ###################################
@@ -47,9 +48,10 @@ from module.plugins.Hoster import Hoster
 class MegaCoNz(Hoster):
     __name__    = "MegaCoNz"
     __type__    = "hoster"
-    __version__ = "0.21"
+    __version__ = "0.31"
+    __status__  = "testing"
 
-    __pattern__ = r'https?://(?:www\.)?mega\.co\.nz/#(?P<TYPE>N)?!(?P<ID>[\w^_]+)!(?P<KEY>[\w,\\-]+)'
+    __pattern__ = r'(https?://(?:www\.)?mega(\.co)?\.nz/|mega:|chrome:.+?)#(?P<TYPE>N|)!(?P<ID>[\w^_]+)!(?P<KEY>[\w,-]+)'
 
     __description__ = """Mega.co.nz hoster plugin"""
     __license__     = "GPLv3"
@@ -66,55 +68,60 @@ class MegaCoNz(Hoster):
         return standard_b64decode(data + '=' * (-len(data) % 4))
 
 
-    def getCipherKey(self, key):
-        """ Construct the cipher key from the given data """
-        key = self.b64_decode(key)
+    def get_cipher_key(self, key):
+        """
+        Construct the cipher key from the given data
+        """
+        a = array.array("I", self.b64_decode(key))
 
-        k        = key[0] ^ key[4], key[1] ^ key[5], key[2] ^ key[6], key[3] ^ key[7]
-        iv       = key[4:6] + (0, 0)
-        meta_mac = key[6:8]
+        k        = array.array("I", (a[0] ^ a[4], a[1] ^ a[5], a[2] ^ a[6], a[3] ^ a[7]))
+        iv       = a[4:6] + array.array("I", (0, 0))
+        meta_mac = a[6:8]
 
         return k, iv, meta_mac
 
 
     def api_response(self, **kwargs):
-        """ Dispatch a call to the api, see https://mega.co.nz/#developers """
-
-        # generate a session id, no idea where to obtain elsewhere
+        """
+        Dispatch a call to the api, see https://mega.co.nz/#developers
+        """
+        #: Generate a session id, no idea where to obtain elsewhere
         uid = random.randint(10 << 9, 10 ** 10)
 
         res = self.load(self.API_URL, get={'id': uid}, post=json_dumps([kwargs]))
-        self.logDebug("Api Response: " + res)
+        self.log_debug("Api Response: " + res)
         return json_loads(res)
 
 
-    def decryptAttr(self, data, key):
-        k, iv, meta_mac = self.getCipherKey(key)
+    def decrypt_attr(self, data, key):
+        k, iv, meta_mac = self.get_cipher_key(key)
         cbc             = AES.new(k, AES.MODE_CBC, "\0" * 16)
-        attr            = cbc.decrypt(self.b64_decode(data))
+        attr            = decode(cbc.decrypt(self.b64_decode(data)))
 
-        self.logDebug("Decrypted Attr: " + attr)
+        self.log_debug("Decrypted Attr: %s" % attr)
         if not attr.startswith("MEGA"):
             self.fail(_("Decryption failed"))
 
-        # Data is padded, 0-bytes must be stripped
+        #: Data is padded, 0-bytes must be stripped
         return json_loads(re.search(r'{.+?}', attr).group(0))
 
 
-    def decryptFile(self, key):
-        """  Decrypts the file at lastDownload` """
-
-        # upper 64 bit of counter start
+    def decrypt_file(self, key):
+        """
+        Decrypts the file at last_download`
+        """
+        #: Upper 64 bit of counter start
         n = self.b64_decode(key)[16:24]
 
-        # convert counter to long and shift bytes
-        k, iv, meta_mac = self.getCipherKey(key)
+        #: Convert counter to long and shift bytes
+        k, iv, meta_mac = self.get_cipher_key(key)
         ctr             = Counter.new(128, initial_value=long(n.encode("hex"), 16) << 64)
         cipher          = AES.new(k, AES.MODE_CTR, counter=ctr)
 
         self.pyfile.setStatus("decrypting")
+        self.pyfile.setProgress(0)
 
-        file_crypted   = self.lastDownload
+        file_crypted   = fs_encode(self.last_download)
         file_decrypted = file_crypted.rsplit(self.FILE_SUFFIX)[0]
 
         try:
@@ -122,12 +129,13 @@ class MegaCoNz(Hoster):
             df = open(file_decrypted, "wb")
 
         except IOError, e:
-            self.fail(str(e))
+            self.fail(e)
 
-        chunk_size = 2 ** 15  # buffer size, 32k
+        chunk_size = 2 ** 15  #: Buffer size, 32k
         # file_mac   = [0, 0, 0, 0]  # calculate CBC-MAC for checksum
 
-        while True:
+        chunks = os.path.getsize(file_crypted) / chunk_size + 1
+        for i in xrange(chunks):
             buf = f.read(chunk_size)
             if not buf:
                 break
@@ -135,21 +143,42 @@ class MegaCoNz(Hoster):
             chunk = cipher.decrypt(buf)
             df.write(chunk)
 
+            self.pyfile.setProgress(int((100.0 / chunks) * i))
+
+            # chunk_mac = [iv[0], iv[1], iv[0], iv[1]]
+            # for i in xrange(0, chunk_size, 16):
+                # block = chunk[i:i+16]
+                # if len(block) % 16:
+                    # block += '=' * (16 - (len(block) % 16))
+                # block = array.array("I", block)
+
+                # chunk_mac = [chunk_mac[0] ^ a_[0], chunk_mac[1] ^ block[1], chunk_mac[2] ^ block[2], chunk_mac[3] ^ block[3]]
+                # chunk_mac = aes_cbc_encrypt_a32(chunk_mac, k)
+
+            # file_mac = [file_mac[0] ^ chunk_mac[0], file_mac[1] ^ chunk_mac[1], file_mac[2] ^ chunk_mac[2], file_mac[3] ^ chunk_mac[3]]
+            # file_mac = aes_cbc_encrypt_a32(file_mac, k)
+
+        self.pyfile.setProgress(100)
+
         f.close()
         df.close()
 
-        remove(file_crypted)
-        self.lastDownload = file_decrypted
+        # if file_mac[0] ^ file_mac[1], file_mac[2] ^ file_mac[3] is not meta_mac:
+            # os.remove(file_decrypted)
+            # self.fail(_("Checksum mismatch"))
+
+        os.remove(file_crypted)
+        self.last_download = fs_decode(file_decrypted)
 
 
-    def checkError(self, code):
+    def check_error(self, code):
         ecode = abs(code)
 
         if ecode in (9, 16, 21):
             self.offline()
 
         elif ecode in (3, 13, 17, 18, 19):
-            self.tempOffline()
+            self.temp_offline()
 
         elif ecode in (1, 4, 6, 10, 15, 21):
             self.retry(5, 30, _("Error code: [%s]") % -ecode)
@@ -162,30 +191,32 @@ class MegaCoNz(Hoster):
         pattern = re.match(self.__pattern__, pyfile.url).groupdict()
         id      = pattern['ID']
         key     = pattern['KEY']
-        public  = 'TYPE' not in pattern
+        public  = pattern['TYPE'] == ""
 
-        self.logDebug("ID: %s" % id, "Key: %s" % key, "Type: %s" % ("public" if public else "node"))
+        self.log_debug("ID: %s" % id, "Key: %s" % key, "Type: %s" % ("public" if public else "node"))
 
-        # g is for requesting a download url
-        # this is similar to the calls in the mega js app, documentation is very bad
+        #: G is for requesting a download url
+        #: This is similar to the calls in the mega js app, documentation is very bad
         if public:
             mega = self.api_response(a="g", g=1, p=id, ssl=1)[0]
         else:
             mega = self.api_response(a="g", g=1, n=id, ssl=1)[0]
 
-        if "e" in mega:
-            self.checkError(mega['e'])
+        if isinstance(mega, int):
+            self.check_error(mega)
+        elif "e" in mega:
+            self.check_error(mega['e'])
 
-        attr = self.decryptAttr(mega['at'], key)
+        attr = self.decrypt_attr(mega['at'], key)
 
         pyfile.name = attr['n'] + self.FILE_SUFFIX
         pyfile.size = mega['s']
 
-        # self.req.http.c.setopt(SSL_CIPHER_LIST, "RC4-MD5:DEFAULT")
+        # self.req.http.c.setopt(pycurl.SSL_CIPHER_LIST, "RC4-MD5:DEFAULT")
 
         self.download(mega['g'])
 
-        self.decryptFile(key)
+        self.decrypt_file(key)
 
-        # Everything is finished and final name can be set
+        #: Everything is finished and final name can be set
         pyfile.name = attr['n']

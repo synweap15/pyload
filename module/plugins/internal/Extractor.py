@@ -1,5 +1,12 @@
 # -*- coding: utf-8 -*-
 
+import os
+import re
+
+from module.PyFile import PyFile
+from module.plugins.internal.Plugin import Plugin
+
+
 class ArchiveError(Exception):
     pass
 
@@ -12,61 +19,78 @@ class PasswordError(Exception):
     pass
 
 
-class Extractor:
+class Extractor(Plugin):
     __name__    = "Extractor"
-    __version__ = "0.13"
+    __type__    = "extractor"
+    __version__ = "0.34"
+    __status__  = "testing"
 
     __description__ = """Base extractor plugin"""
     __license__     = "GPLv3"
-    __authors__     = [("RaNaN", "ranan@pyload.org"),
-                       ("Walter Purcaro", "vuolter@gmail.com")]
+    __authors__     = [("Walter Purcaro", "vuolter@gmail.com"),
+                       ("Immenz"        , "immenz@gmx.net"   )]
 
 
     EXTENSIONS = []
+    REPAIR     = False
+    VERSION    = None
 
 
     @classmethod
-    def checkDeps(cls):
-        """ Check if system statisfy dependencies
-        :return: boolean
+    def is_archive(cls, filename):
+        name = os.path.basename(filename).lower()
+        return any(name.endswith(ext) for ext in cls.EXTENSIONS)
+
+
+    @classmethod
+    def find(cls):
         """
-        return True
+        Check if system statisfy dependencies
+        """
+        pass
 
 
     @classmethod
-    def isArchive(cls, file):
-        raise NotImplementedError
-
-
-    @classmethod
-    def getTargets(cls, files_ids):
-        """ Filter suited targets from list of filename id tuple list
+    def get_targets(cls, files_ids):
+        """
+        Filter suited targets from list of filename id tuple list
         :param files_ids: List of filepathes
         :return: List of targets, id tuple list
         """
         targets = []
+        processed = []
 
-        for file, id in files_ids:
-            if cls.isArchive(file):
-                targets.append((file, id))
+        for fname, id, fout in files_ids:
+            if cls.is_archive(fname):
+                pname = re.sub(cls.re_multipart, "", fname) if cls.is_multipart(fname) else os.path.splitext(fname)[0]
+                if pname not in processed:
+                    processed.append(pname)
+                    targets.append((fname, id, fout))
 
         return targets
 
 
-    def __init__(self, m, file, out, password, fullpath, overwrite, excludefiles, renice, delete, keepbroken):
-        """Initialize extractor for specific file
+    @property
+    def target(self):
+        return fs_encode(self.filename)
 
-        :param m: ExtractArchive Hook plugin
-        :param file: Absolute filepath
-        :param out: Absolute path to destination directory
-        :param fullpath: extract to fullpath
-        :param overwrite: Overwrite existing archives
-        :param renice: Renice value
+
+    def __init__(self, plugin, filename, out,
+                 fullpath=True,
+                 overwrite=False,
+                 excludefiles=[],
+                 renice=0,
+                 delete='No',
+                 keepbroken=False,
+                 fid=None):
         """
-        self.m            = m
-        self.file         = file
+        Initialize extractor for specific file
+        """
+        self._init(plugin.pyload)
+
+        self.plugin       = plugin
+        self.filename     = filename
         self.out          = out
-        self.password     = password
         self.fullpath     = fullpath
         self.overwrite    = overwrite
         self.excludefiles = excludefiles
@@ -75,66 +99,55 @@ class Extractor:
         self.keepbroken   = keepbroken
         self.files        = []  #: Store extracted files here
 
+        pyfile = self.pyload.files.getFile(fid) if fid else None
+        self.notify_progress = lambda x: pyfile.setProgress(x) if pyfile else lambda x: None
+
+        self.init()
+
 
     def init(self):
-        """ Initialize additional data structures """
-        pass
-
-
-    def verify(self):
-        """Check if password if needed. Raise ArchiveError if integrity is
-        questionable.
-
-        :raises ArchiveError
+        """
+        Initialize additional data structures
         """
         pass
 
 
-    def isPassword(self, password):
-        """ Check if the given password is/might be correct.
-        If it can not be decided at this point return true.
+    def _log(self, level, plugintype, pluginname, messages):
+        return self.plugin._log(level,
+                                plugintype,
+                                self.plugin.__name__,
+                                (self.__name__,) + messages)
 
-        :param password:
-        :return: boolean
+
+    def verify(self, password=None):
         """
-        if isinstance(password, basestring):
-            return True
-        else:
-            return False
-
-
-    def setPassword(self, password):
-        if self.isPassword(password):
-            self.password = password
-            return True
-        else:
-            return False
+        Testing with Extractors built-in method
+        Raise error if password is needed, integrity is questionable or else
+        """
+        pass
 
 
     def repair(self):
         return False
 
 
-    def extract(self, progress=lambda x: None):
-        """Extract the archive. Raise specific errors in case of failure.
-
-        :param progress: Progress function, call this to update status
-        :raises PasswordError
-        :raises CRCError
-        :raises ArchiveError
-        :return:
+    def extract(self, password=None):
+        """
+        Extract the archive
+        Raise specific errors in case of failure
         """
         raise NotImplementedError
 
 
-    def getDeleteFiles(self):
-        """Return list of files to delete, do *not* delete them here.
-
-        :return: List with paths of files to delete
+    def items(self):
         """
-        raise NotImplementedError
+        Return list of archive parts
+        """
+        return [self.filename]
 
 
-    def getExtractedFiles(self):
-        """Populate self.files at some point while extracting"""
+    def list(self, password=None):
+        """
+        Populate self.files at some point while extracting
+        """
         return self.files

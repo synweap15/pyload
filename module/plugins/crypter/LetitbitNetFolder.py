@@ -1,17 +1,18 @@
 # -*- coding: utf-8 -*-
 
 import re
-from module.plugins.Crypter import Crypter
+from module.plugins.internal.Crypter import Crypter
 
 
 class LetitbitNetFolder(Crypter):
     __name__    = "LetitbitNetFolder"
     __type__    = "crypter"
-    __version__ = "0.10"
+    __version__ = "0.12"
+    __status__  = "testing"
 
     __pattern__ = r'http://(?:www\.)?letitbit\.net/folder/\w+'
-    __config__  = [("use_subfolder", "bool", "Save package to subfolder", True),
-                   ("subfolder_per_package", "bool", "Create a subfolder for each package", True)]
+    __config__  = [("use_subfolder"     , "bool", "Save package to subfolder"          , True),
+                   ("subfolder_per_pack", "bool", "Create a subfolder for each package", True)]
 
     __description__ = """Letitbit.net folder decrypter plugin"""
     __license__     = "GPLv3"
@@ -20,7 +21,7 @@ class LetitbitNetFolder(Crypter):
 
 
     FOLDER_PATTERN = r'<table>(.*)</table>'
-    LINK_PATTERN = r'<a href="([^"]+)" target="_blank">'
+    LINK_PATTERN = r'<a href="(.+?)" target="_blank">'
 
 
     def decrypt(self, pyfile):
